@@ -1,0 +1,31 @@
+# Production web image: React app + nginx, with the exercise media baked in.
+#
+# Upstream ships the media as a one-shot `media` container that clones a ~140 MB dataset
+# into a bind mount on first start. Baking it into the image instead keeps the deployment
+# deterministic (no network fetch at boot, no one-shot job for the orchestrator to babysit)
+# and costs only disk, which the host has plenty of.
+#
+# --platform=$BUILDPLATFORM pins the build stages to the runner's native arch: the outputs
+# (static assets, images) are arch-independent, and QEMU-emulated npm installs are known to
+# corrupt esbuild/rollup native binaries.
+
+FROM --platform=$BUILDPLATFORM node:22-alpine AS build
+WORKDIR /app
+COPY frontend/package.json frontend/package-lock.json* ./
+RUN npm ci 2>/dev/null || npm install
+COPY frontend/ ./
+RUN npm run build
+
+FROM --platform=$BUILDPLATFORM alpine/git AS media
+WORKDIR /src
+RUN git clone --depth 1 https://github.com/hasaneyldrm/exercises-dataset ds \
+    && mkdir -p /out/img /out/gif \
+    && cp ds/images/*.jpg /out/img/ \
+    && cp ds/videos/*.gif /out/gif/ \
+    && rm -rf ds
+
+FROM nginx:alpine
+COPY web/nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /app/dist /usr/share/nginx/html
+COPY --from=media /out/img /usr/share/nginx/html/img
+COPY --from=media /out/gif /usr/share/nginx/html/gif

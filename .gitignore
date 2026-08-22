@@ -1,0 +1,13 @@
+# Runtime state — users, passkeys, session secret, VAPID keys. Never commit.
+/data/
+
+# Exercise media is baked into the web image at build time.
+/media/
+
+# Local environment
+.env
+.env.local
+
+node_modules/
+dist/
+.DS_Store

@@ -1,0 +1,53 @@
+# openGym — production stack for the Coolify-managed host.
+#
+# Differences from the upstream compose, and why:
+#   - No `build:` — images are built in CI and pulled from GHCR.
+#   - No published host ports — Traefik reaches the containers over the Docker network.
+#     (The upstream default of 8080 collides with coolify-proxy on this host.)
+#   - No one-shot `media` container — the exercise images/GIFs are baked into the web image.
+#   - Memory limits — the host also runs Supabase, n8n and Chatwoot.
+
+services:
+  # Passkey auth + per-user data. No database: state is JSON files under /data.
+  api:
+    image: ghcr.io/fnsalinas/opengym-api:latest
+    restart: unless-stopped
+    environment:
+      - PORT=3000
+      - DATA_DIR=/data
+      - RP_ID=${RP_ID}
+      - ORIGIN=${ORIGIN}
+      - RP_NAME=${RP_NAME}
+      - INVITE_ONLY=${INVITE_ONLY}
+      - ADMIN_UIDS=${ADMIN_UIDS}
+      - SESSION_DAYS=${SESSION_DAYS}
+      - VAPID_SUBJECT=${VAPID_SUBJECT}
+    volumes:
+      # Users, passkeys, workout history, session secret, VAPID keys.
+      # This directory is the entire backup surface.
+      - ./data:/data
+    mem_limit: 384m
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  # Static app + nginx, proxying /api to the api container.
+  # Single origin, which WebAuthn requires.
+  web:
+    image: ghcr.io/fnsalinas/opengym-web:latest
+    restart: unless-stopped
+    environment:
+      - SERVICE_FQDN_WEB_80
+    depends_on:
+      api:
+        condition: service_started
+    mem_limit: 128m
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
